@@ -1,0 +1,16 @@
+{
+  "name": "neolegacy-skin-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Custom skin storage for neoLegacy, backed by Neon PostgreSQL",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}
