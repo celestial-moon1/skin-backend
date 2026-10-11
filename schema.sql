@@ -31,3 +31,11 @@ CREATE TABLE IF NOT EXISTS link_requests (
 	expires_at TIMESTAMPTZ NOT NULL
 );
 
+
+-- Game devices. Each link issues one secret token, stored only as a SHA-256 hash. The game sends it to /game/me
+-- so the server, not the local uid.dat file alone, decides which XUID this device owns.
+CREATE TABLE IF NOT EXISTS device_tokens (
+	token_hash TEXT PRIMARY KEY,
+	account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

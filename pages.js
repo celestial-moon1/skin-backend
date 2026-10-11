@@ -14,7 +14,7 @@ function escapeHtml(value) {
 
 function layout(title, body, account) {
 	const nav = account
-		? '<a href="/">Home</a> <a href="/upload">Upload skin</a> <a href="/link">Link game</a> ' +
+		? '<a href="/">Home</a> <a href="/upload">Upload skin</a> <a href="/link">Link game</a> <a href="/account">Account</a> ' +
 		  '<form method="post" action="/logout" class="inline"><button type="submit">Log out</button></form>'
 		: '<a href="/login">Log in</a> <a href="/register">Create account</a>';
 	return `<!doctype html>
@@ -97,6 +97,19 @@ function link({ account, error, ok }) {
 		account);
 }
 
+function account({ account, error, ok }) {
+	return layout('Account',
+		message(error, ok) +
+		`<p>Signed in as <strong>${escapeHtml(account.username)}</strong>.</p>` +
+		'<p>Your game ID (XUID) stays the same when you change your username.</p>' +
+		'<form method="post" action="/me/username">' +
+		`<label>New username (3 to 16 letters, numbers or _)<br><input name="username" value="${escapeHtml(account.username)}" required maxlength="16" pattern="[A-Za-z0-9_]{3,16}"></label>` +
+		'<button type="submit">Change username</button>' +
+		'</form>' +
+		'<p>The game shows the new name the next time it starts.</p>',
+		account);
+}
+
 function upload({ account, error, ok }) {
 	const xuid = escapeHtml(account.xuid);
 	return layout('Upload skin',
@@ -129,4 +142,4 @@ function upload({ account, error, ok }) {
 		account);
 }
 
-module.exports = { home, register, login, link, upload };
+module.exports = { home, register, login, link, account, upload };

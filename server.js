@@ -131,6 +131,32 @@ async function requireAccount(req) {
 
 // ---- Game routes -----------------------------------------------------------
 
+// The game sends its device secret as "Authorization: Bearer <token>". The server returns the account
+// that secret belongs to, so the XUID comes from the server and not from a local file.
+async function handleGameMe(req, res) {
+	const header = req.headers.authorization || '';
+	const match = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(header);
+	if (!match) throw new HttpError(401, 'device token required');
+	const result = await pool.query(
+		`SELECT a.xuid, a.username
+		   FROM device_tokens d JOIN accounts a ON a.id = d.account_id
+		  WHERE d.token_hash = $1`,
+		[auth.sha256Hex(match[1])]
+	);
+	if (result.rowCount === 0) throw new HttpError(401, 'device token not recognised');
+	sendJson(res, 200, { xuid: result.rows[0].xuid, username: result.rows[0].username });
+}
+
+// The game calls this when the player logs out. It deletes this device's row so the token stops working.
+// It is idempotent: an unknown or already-revoked token still gets 200, so the game can ignore the result.
+async function handleGameLogout(req, res) {
+	const header = req.headers.authorization || '';
+	const match = /^Bearer ([A-Za-z0-9_-]{20,128})$/.exec(header);
+	if (!match) throw new HttpError(401, 'device token required');
+	const result = await pool.query('DELETE FROM device_tokens WHERE token_hash = $1', [auth.sha256Hex(match[1])]);
+	sendJson(res, 200, { ok: true, revoked: result.rowCount > 0 });
+}
+
 async function handleGetSkin(xuid, res) {
 	const result = await pool.query('SELECT png FROM skins WHERE xuid = $1', [xuid]);
 	if (result.rowCount === 0) throw new HttpError(404, 'no skin for this xuid');
@@ -169,8 +195,14 @@ async function handleLinkStatus(url, res) {
 	const row = result.rows[0];
 	if (row.account_id !== null) {
 		// Claimed. The request is single use, so delete it once the game has the XUID.
+		// The device secret is issued here, once. The game stores it and sends it to /game/me.
+		const deviceToken = auth.randomToken();
 		await pool.query('DELETE FROM link_requests WHERE token_hash = $1', [auth.sha256Hex(token)]);
-		return sendJson(res, 200, { status: 'claimed', xuid: row.xuid, username: row.username });
+		await pool.query(
+			'INSERT INTO device_tokens (token_hash, account_id) VALUES ($1, $2)',
+			[auth.sha256Hex(deviceToken), row.account_id]
+		);
+		return sendJson(res, 200, { status: 'claimed', xuid: row.xuid, username: row.username, deviceToken });
 	}
 	if (!row.live) throw new HttpError(410, 'link code expired');
 	sendJson(res, 200, { status: 'pending' });
@@ -258,6 +290,12 @@ async function handleWebsiteLink(req, res) {
 	sendHtml(res, 200, pages.link({ account, ok: 'Linked. You can return to the game.' }));
 }
 
+async function handleAccountPage(req, res) {
+	const account = await currentAccount(req);
+	if (!account) return redirect(res, '/login');
+	sendHtml(res, 200, pages.account({ account }));
+}
+
 async function handleUploadPage(req, res) {
 	const account = await currentAccount(req);
 	if (!account) return redirect(res, '/login');
@@ -267,6 +305,26 @@ async function handleUploadPage(req, res) {
 async function handleHome(req, res) {
 	const account = await currentAccount(req);
 	sendHtml(res, 200, pages.home(account));
+}
+
+// Changes the website username. The XUID does not change, so the game keeps its identity.
+// Same rules as registration. The game picks up the new name the next time it checks /game/me.
+async function handleChangeUsername(req, res) {
+	const account = await requireAccount(req);
+	const form = await readForm(req);
+	const username = (form.username || '').trim();
+	if (!USERNAME_RE.test(username)) {
+		return sendHtml(res, 400, pages.account({ account, error: 'Username must be 3 to 16 letters, numbers or _.' }));
+	}
+	try {
+		await pool.query('UPDATE accounts SET username = $1 WHERE id = $2', [username, account.id]);
+	} catch (err) {
+		if (err.code === '23505') {
+			return sendHtml(res, 409, pages.account({ account, error: 'That username is taken.' }));
+		}
+		throw err;
+	}
+	sendHtml(res, 200, pages.account({ account: { ...account, username }, ok: 'Username changed.' }));
 }
 
 async function handlePutMySkin(req, res) {
@@ -305,6 +363,8 @@ const server = http.createServer(async (req, res) => {
 		if (skinMatch && req.method === 'GET') return await handleGetSkin(skinMatch[1], res);
 		if (p === '/link/start' && req.method === 'POST') return await handleLinkStart(res);
 		if (p === '/link/status' && req.method === 'GET') return await handleLinkStatus(url, res);
+		if (p === '/game/me' && req.method === 'GET') return await handleGameMe(req, res);
+		if (p === '/game/logout' && req.method === 'POST') return await handleGameLogout(req, res);
 
 		// Website routes
 		if (p === '/' && req.method === 'GET') return await handleHome(req, res);
@@ -314,6 +374,8 @@ const server = http.createServer(async (req, res) => {
 		if (p === '/link') return await handleWebsiteLink(req, res);
 		if (p === '/upload' && req.method === 'GET') return await handleUploadPage(req, res);
 		if (p === '/me/skin' && req.method === 'PUT') return await handlePutMySkin(req, res);
+		if (p === '/me/username' && req.method === 'POST') return await handleChangeUsername(req, res);
+		if (p === '/account' && req.method === 'GET') return await handleAccountPage(req, res);
 
 		throw new HttpError(404, 'not found');
 	} catch (err) {
