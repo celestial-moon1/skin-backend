@@ -5,7 +5,7 @@
 // Game routes:
 //   GET  /skins/<xuid>           PNG skin for an XUID (read only)
 //   POST /link/start             game asks for a link code; returns { code, token, expiresIn }
-//   GET  /link/status?token=...  game polls; { status: "pending" } or { status: "claimed", xuid }
+//   GET  /link/status?token=...  game polls; { status: "pending" } or { status: "claimed", xuid, username }
 //
 // Website routes (cookie session):
 //   /, /register, /login, /logout, /link, /upload
@@ -160,7 +160,7 @@ async function handleLinkStatus(url, res) {
 	const token = url.searchParams.get('token') || '';
 	if (!token) throw new HttpError(400, 'token is required');
 	const result = await pool.query(
-		`SELECT l.account_id, a.xuid, l.expires_at > now() AS live
+		`SELECT l.account_id, a.xuid, a.username, l.expires_at > now() AS live
 		   FROM link_requests l LEFT JOIN accounts a ON a.id = l.account_id
 		  WHERE l.token_hash = $1`,
 		[auth.sha256Hex(token)]
@@ -170,7 +170,7 @@ async function handleLinkStatus(url, res) {
 	if (row.account_id !== null) {
 		// Claimed. The request is single use, so delete it once the game has the XUID.
 		await pool.query('DELETE FROM link_requests WHERE token_hash = $1', [auth.sha256Hex(token)]);
-		return sendJson(res, 200, { status: 'claimed', xuid: row.xuid });
+		return sendJson(res, 200, { status: 'claimed', xuid: row.xuid, username: row.username });
 	}
 	if (!row.live) throw new HttpError(410, 'link code expired');
 	sendJson(res, 200, { status: 'pending' });
