@@ -59,11 +59,15 @@ function readBody(req) {
 	return new Promise((resolve, reject) => {
 		const chunks = [];
 		let total = 0;
+		let tooLarge = false;
 		req.on('data', (chunk) => {
 			total += chunk.length;
 			if (total > MAX_BODY_BYTES) {
-				req.destroy();
-				reject(new HttpError(413, 'body too large'));
+				// Keep the socket open so the 413 reaches the client. Destroying it makes Render's proxy return 502.
+				if (!tooLarge) {
+					tooLarge = true;
+					reject(new HttpError(413, 'body too large'));
+				}
 				return;
 			}
 			chunks.push(chunk);
