@@ -1,9 +1,15 @@
 -- Custom skins keyed by XUID. Run automatically at startup (IF NOT EXISTS keeps it idempotent).
+-- model is the arm model picked on the upload page: 'classic' (4-pixel arms) or 'slim' (3-pixel arms, Alex).
+-- The PNG size cannot carry this: slim and classic are both commonly 64x64, so the game reads this column.
 CREATE TABLE IF NOT EXISTS skins (
 	xuid       TEXT PRIMARY KEY,
 	png        BYTEA NOT NULL,
+	model      TEXT NOT NULL DEFAULT 'classic',
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so add the column for databases made before it.
+ALTER TABLE skins ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'classic';
 
 -- Website accounts. The password is stored as a scrypt hash (see auth.js), never in plain text.
 -- The XUID is issued by this backend when the account is created. It is not a real Xbox XUID.

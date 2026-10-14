@@ -9,7 +9,8 @@
 //
 // Website routes (cookie session):
 //   /, /register, /login, /logout, /link, /upload
-//   PUT /me/skin                 upload a PNG for the logged-in account
+//   PUT /me/skin?model=classic|slim   upload a PNG for the logged-in account and set its arm model
+//                                     GET /skins/<xuid> returns the model in the X-Skin-Model header
 
 const http = require('http');
 const fs = require('fs');
@@ -26,6 +27,8 @@ const ALLOWED_SIZES = [
 	{ width: 64, height: 64 },
 ];
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
+// Arm models a skin can use. The game maps 'slim' to the 3-pixel-arm model and everything else to the classic one.
+const SKIN_MODELS = ['classic', 'slim'];
 
 if (!process.env.DATABASE_URL) {
 	console.error('DATABASE_URL is not set. Set it to your Neon connection string.');
@@ -54,6 +57,12 @@ function isValidSkinPng(buf) {
 	const width = buf.readUInt32BE(16);
 	const height = buf.readUInt32BE(20);
 	return ALLOWED_SIZES.some((s) => s.width === width && s.height === height);
+}
+
+// Maps a user-supplied model to a stored value. A missing or unknown value falls back to classic.
+function normaliseSkinModel(value) {
+	const model = String(value == null ? '' : value).trim().toLowerCase();
+	return SKIN_MODELS.includes(model) ? model : 'classic';
 }
 
 function sendJson(res, status, obj) {
@@ -158,13 +167,15 @@ async function handleGameLogout(req, res) {
 }
 
 async function handleGetSkin(xuid, res) {
-	const result = await pool.query('SELECT png FROM skins WHERE xuid = $1', [xuid]);
+	const result = await pool.query('SELECT png, model FROM skins WHERE xuid = $1', [xuid]);
 	if (result.rowCount === 0) throw new HttpError(404, 'no skin for this xuid');
 	const png = result.rows[0].png;
 	res.writeHead(200, {
 		'Content-Type': 'image/png',
 		'Content-Length': png.length,
 		'Cache-Control': 'no-cache',
+		// The game reads this to pick the arm model. An absent header means classic, so old rows keep working.
+		'X-Skin-Model': normaliseSkinModel(result.rows[0].model),
 	});
 	res.end(png);
 }
@@ -299,7 +310,10 @@ async function handleAccountPage(req, res) {
 async function handleUploadPage(req, res) {
 	const account = await currentAccount(req);
 	if (!account) return redirect(res, '/login');
-	sendHtml(res, 200, pages.upload({ account }));
+	// Pre-select the model already stored, so re-uploading a skin keeps the player's choice.
+	const result = await pool.query('SELECT model FROM skins WHERE xuid = $1', [account.xuid]);
+	const model = result.rowCount === 0 ? 'classic' : normaliseSkinModel(result.rows[0].model);
+	sendHtml(res, 200, pages.upload({ account, model }));
 }
 
 async function handleHome(req, res) {
@@ -333,16 +347,18 @@ async function handlePutMySkin(req, res) {
 	if (contentType !== 'image/png') {
 		throw new HttpError(415, 'content-type must be image/png');
 	}
+	// The upload page sends the arm model as ?model=classic|slim. Anything else falls back to classic.
+	const model = normaliseSkinModel(new URL(req.url, 'http://localhost').searchParams.get('model'));
 	const png = await readBody(req);
 	if (!isValidSkinPng(png)) {
 		throw new HttpError(400, 'invalid png: must be 64x32 or 64x64');
 	}
 	await pool.query(
-		`INSERT INTO skins (xuid, png, updated_at) VALUES ($1, $2, now())
-		 ON CONFLICT (xuid) DO UPDATE SET png = EXCLUDED.png, updated_at = now()`,
-		[account.xuid, png]
+		`INSERT INTO skins (xuid, png, model, updated_at) VALUES ($1, $2, $3, now())
+		 ON CONFLICT (xuid) DO UPDATE SET png = EXCLUDED.png, model = EXCLUDED.model, updated_at = now()`,
+		[account.xuid, png, model]
 	);
-	sendJson(res, 200, { ok: true, xuid: account.xuid, bytes: png.length });
+	sendJson(res, 200, { ok: true, xuid: account.xuid, model, bytes: png.length });
 }
 
 

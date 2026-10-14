@@ -28,7 +28,11 @@ body { font-family: sans-serif; max-width: 640px; margin: 2em auto; padding: 0 1
 nav a { margin-right: 1em; }
 form.inline { display: inline; }
 form label { display: block; margin-top: 1em; }
+fieldset { margin-top: 1em; }
+fieldset label.inline { display: inline-block; margin-top: 0; margin-right: 1em; }
+fieldset label.inline input { margin-right: 0.3em; }
 input { padding: 0.4em; }
+input[type=radio] { padding: 0; }
 button { padding: 0.4em 1em; margin-top: 1em; }
 code { font-size: 1.2em; }
 .error { color: #b00020; }
@@ -110,27 +114,37 @@ function account({ account, error, ok }) {
 		account);
 }
 
-function upload({ account, error, ok }) {
+function upload({ account, error, ok, model }) {
 	const xuid = escapeHtml(account.xuid);
+	const currentModel = model === 'slim' ? 'slim' : 'classic';
+	const classicChecked = currentModel === 'classic' ? ' checked' : '';
+	const slimChecked = currentModel === 'slim' ? ' checked' : '';
 	return layout('Upload skin',
 		message(error, ok) +
 		'<p>Current skin:</p>' +
 		`<img class="skin" id="current" src="/skins/${xuid}" alt="" onerror="this.style.display='none'">` +
-		'<p><input type="file" id="file" accept="image/png"> ' +
-		'<button type="button" id="send">Upload</button></p>' +
+		'<p><input type="file" id="file" accept="image/png"></p>' +
+		'<fieldset>' +
+		'<legend>Arm model</legend>' +
+		`<label class="inline"><input type="radio" name="model" value="classic"${classicChecked}> Classic (4-pixel arms)</label>` +
+		`<label class="inline"><input type="radio" name="model" value="slim"${slimChecked}> Slim (3-pixel arms, Alex)</label>` +
+		'</fieldset>' +
+		'<p><button type="button" id="send">Upload</button></p>' +
 		'<p>PNG only, 64x32 or 64x64 pixels.</p>' +
 		'<p id="status"></p>' +
 		'<script>' +
 		'document.getElementById("send").addEventListener("click", async function () {' +
 		'  var status = document.getElementById("status");' +
 		'  var file = document.getElementById("file").files[0];' +
+		'  var model = document.querySelector("input[name=\\"model\\"]:checked");' +
+		'  model = model ? model.value : "classic";' +
 		'  if (!file) { status.className = "error"; status.textContent = "Choose a PNG first."; return; }' +
 		'  status.className = ""; status.textContent = "Uploading...";' +
 		'  try {' +
-		'    var res = await fetch("/me/skin", { method: "PUT", headers: { "Content-Type": "image/png" }, body: file, credentials: "same-origin" });' +
+		'    var res = await fetch("/me/skin?model=" + encodeURIComponent(model), { method: "PUT", headers: { "Content-Type": "image/png" }, body: file, credentials: "same-origin" });' +
 		'    var data = await res.json().catch(function () { return {}; });' +
 		'    if (res.ok) {' +
-		'      status.className = "ok"; status.textContent = "Uploaded.";' +
+		'      status.className = "ok"; status.textContent = "Uploaded (" + (data.model || model) + ").";' +
 		'      document.getElementById("current").style.display = "";' +
 		'      document.getElementById("current").src = "/skins/' + xuid + '?" + Date.now();' +
 		'    } else {' +
