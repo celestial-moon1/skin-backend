@@ -11,6 +11,9 @@
 //   /, /register, /login, /logout, /link, /upload
 //   PUT /me/skin?model=classic|slim   upload a PNG for the logged-in account and set its arm model
 //                                     GET /skins/<xuid> returns the model in the X-Skin-Model header
+//
+// Other routes:
+//   GET /health  liveness; { ok, commit } where commit is the revision this process was built from
 
 const http = require('http');
 const fs = require('fs');
@@ -29,6 +32,9 @@ const ALLOWED_SIZES = [
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 // Arm models a skin can use. The game maps 'slim' to the 3-pixel-arm model and everything else to the classic one.
 const SKIN_MODELS = ['classic', 'slim'];
+// The commit this process was built from, so the revision actually running can be checked from outside.
+// Render exposes it as RENDER_GIT_COMMIT on every deploy. Elsewhere it is absent, which reads as null.
+const GIT_COMMIT = process.env.RENDER_GIT_COMMIT || null;
 
 if (!process.env.DATABASE_URL) {
 	console.error('DATABASE_URL is not set. Set it to your Neon connection string.');
@@ -371,7 +377,8 @@ const server = http.createServer(async (req, res) => {
 		const url = new URL(req.url, 'http://localhost');
 		const p = url.pathname;
 
-		if (req.method === 'GET' && p === '/health') return sendJson(res, 200, { ok: true });
+		// commit is reported so a deploy can be confirmed from outside; absence means the host does not set it.
+		if (req.method === 'GET' && p === '/health') return sendJson(res, 200, { ok: true, commit: GIT_COMMIT });
 
 		// Game routes
 		const skinMatch = /^\/skins\/([0-9]{1,20})$/.exec(p);

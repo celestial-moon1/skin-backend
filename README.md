@@ -17,3 +17,16 @@ Endpoints:
 - `GET /skins/<xuid>` — returns the PNG and the model in the `X-Skin-Model` header. A client that
   sees no header should assume `classic`.
 - `GET /upload` — pre-selects the model already stored, so re-uploading keeps the player's choice.
+
+## Health and deploys
+
+`GET /health` returns `{ "ok": true, "commit": "<sha>" }`. The commit is the revision the running
+process was built from, read from Render's `RENDER_GIT_COMMIT`; off Render it is `null`. Check it
+after a push to confirm the new code is actually live rather than still building:
+
+```
+curl -s https://skin-backend-o3bg.onrender.com/health
+```
+
+The database schema is applied on every boot (`server.js` runs `schema.sql` at startup), so an added
+column arrives with the deploy and needs no manual migration.
