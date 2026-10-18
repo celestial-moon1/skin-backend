@@ -18,6 +18,21 @@ Endpoints:
   sees no header should assume `classic`.
 - `GET /upload` — pre-selects the model already stored, so re-uploading keeps the player's choice.
 
+## Capes
+
+A cape is stored in its own `capes` table, keyed by the same XUID, so a player can wear a custom skin and a
+custom cape at the same time. A cape has **no arm model**: the classic/slim choice applies to skins only.
+
+Endpoints:
+
+- `PUT /me/cape` — stores the cape PNG for the logged-in account. No query parameters.
+- `GET /capes/<xuid>` — returns the cape PNG, or 404 when the player has none. No `X-Skin-Model` header is
+  sent: the game renders a cape from the model's own UVs and ignores the header for capes.
+- `GET /upload` — the page shows the current cape next to the current skin and uploads each separately.
+
+The game draws the cape from the 10x16 area at the top left of the sheet, so a classic 64x32 cape sheet is
+stored and served as drawn. Both sizes accepted for skins (64x32 and 64x64) are accepted for capes.
+
 ## Health and deploys
 
 `GET /health` returns `{ "ok": true, "commit": "<sha>" }`. The commit is the revision the running

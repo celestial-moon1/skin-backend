@@ -4,6 +4,7 @@
 //
 // Game routes:
 //   GET  /skins/<xuid>           PNG skin for an XUID (read only)
+//   GET  /capes/<xuid>           PNG cape for an XUID (read only, no arm model header)
 //   POST /link/start             game asks for a link code; returns { code, token, expiresIn }
 //   GET  /link/status?token=...  game polls; { status: "pending" } or { status: "claimed", xuid, username }
 //
@@ -11,6 +12,7 @@
 //   /, /register, /login, /logout, /link, /upload
 //   PUT /me/skin?model=classic|slim   upload a PNG for the logged-in account and set its arm model
 //                                     GET /skins/<xuid> returns the model in the X-Skin-Model header
+//   PUT /me/cape                      upload a cape PNG for the logged-in account (no arm model)
 //
 // Other routes:
 //   GET /health  liveness; { ok, commit } where commit is the revision this process was built from
@@ -55,7 +57,10 @@ class HttpError extends Error {
 	}
 }
 
-function isValidSkinPng(buf) {
+// Checked for a skin and a cape alike: both are 64 pixel wide sheets. Which of the two allowed heights is
+// correct depends only on the sheet the artist drew. Nothing else about the image is inspected, and a cape
+// has no arm model, so no other property is needed.
+function isValidPng(buf) {
 	// Layout: 8 bytes signature, 4 bytes IHDR length, 4 bytes type ("IHDR"), then 4 bytes width and 4 bytes height.
 	if (buf.length < 24) return false;
 	if (!buf.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
@@ -182,6 +187,20 @@ async function handleGetSkin(xuid, res) {
 		'Cache-Control': 'no-cache',
 		// The game reads this to pick the arm model. An absent header means classic, so old rows keep working.
 		'X-Skin-Model': normaliseSkinModel(result.rows[0].model),
+	});
+	res.end(png);
+}
+
+// A cape is its own sheet, so this never touches the skin row. There is no arm model for a cape, hence no
+// response header: the game renders the cape from the model's own UVs.
+async function handleGetCape(xuid, res) {
+	const result = await pool.query('SELECT png FROM capes WHERE xuid = $1', [xuid]);
+	if (result.rowCount === 0) throw new HttpError(404, 'no cape for this xuid');
+	const png = result.rows[0].png;
+	res.writeHead(200, {
+		'Content-Type': 'image/png',
+		'Content-Length': png.length,
+		'Cache-Control': 'no-cache',
 	});
 	res.end(png);
 }
@@ -356,7 +375,7 @@ async function handlePutMySkin(req, res) {
 	// The upload page sends the arm model as ?model=classic|slim. Anything else falls back to classic.
 	const model = normaliseSkinModel(new URL(req.url, 'http://localhost').searchParams.get('model'));
 	const png = await readBody(req);
-	if (!isValidSkinPng(png)) {
+	if (!isValidPng(png)) {
 		throw new HttpError(400, 'invalid png: must be 64x32 or 64x64');
 	}
 	await pool.query(
@@ -365,6 +384,26 @@ async function handlePutMySkin(req, res) {
 		[account.xuid, png, model]
 	);
 	sendJson(res, 200, { ok: true, xuid: account.xuid, model, bytes: png.length });
+}
+
+// Stores a cape for the logged-in account. Unlike a skin there is no model query parameter, because a cape
+// has no arm model: the game always uses the 10x16 sheet at the top left of the image.
+async function handlePutMyCape(req, res) {
+	const account = await requireAccount(req);
+	const contentType = (req.headers['content-type'] || '').split(';')[0].trim();
+	if (contentType !== 'image/png') {
+		throw new HttpError(415, 'content-type must be image/png');
+	}
+	const png = await readBody(req);
+	if (!isValidPng(png)) {
+		throw new HttpError(400, 'invalid png: must be 64x32 or 64x64');
+	}
+	await pool.query(
+		`INSERT INTO capes (xuid, png, updated_at) VALUES ($1, $2, now())
+		 ON CONFLICT (xuid) DO UPDATE SET png = EXCLUDED.png, updated_at = now()`,
+		[account.xuid, png]
+	);
+	sendJson(res, 200, { ok: true, xuid: account.xuid, bytes: png.length });
 }
 
 
@@ -382,8 +421,10 @@ const server = http.createServer(async (req, res) => {
 
 		// Game routes
 		const skinMatch = /^\/skins\/([0-9]{1,20})$/.exec(p);
+		const capeMatch = /^\/capes\/([0-9]{1,20})$/.exec(p);
 		// Each route is awaited so its rejection is caught below. Without await, a 401 or 404 from an async handler crashes the process.
 		if (skinMatch && req.method === 'GET') return await handleGetSkin(skinMatch[1], res);
+		if (capeMatch && req.method === 'GET') return await handleGetCape(capeMatch[1], res);
 		if (p === '/link/start' && req.method === 'POST') return await handleLinkStart(res);
 		if (p === '/link/status' && req.method === 'GET') return await handleLinkStatus(url, res);
 		if (p === '/game/me' && req.method === 'GET') return await handleGameMe(req, res);
@@ -397,6 +438,7 @@ const server = http.createServer(async (req, res) => {
 		if (p === '/link') return await handleWebsiteLink(req, res);
 		if (p === '/upload' && req.method === 'GET') return await handleUploadPage(req, res);
 		if (p === '/me/skin' && req.method === 'PUT') return await handlePutMySkin(req, res);
+		if (p === '/me/cape' && req.method === 'PUT') return await handlePutMyCape(req, res);
 		if (p === '/me/username' && req.method === 'POST') return await handleChangeUsername(req, res);
 		if (p === '/account' && req.method === 'GET') return await handleAccountPage(req, res);
 

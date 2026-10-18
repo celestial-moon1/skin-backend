@@ -14,7 +14,7 @@ function escapeHtml(value) {
 
 function layout(title, body, account) {
 	const nav = account
-		? '<a href="/">Home</a> <a href="/upload">Upload skin</a> <a href="/link">Link game</a> <a href="/account">Account</a> ' +
+		? '<a href="/">Home</a> <a href="/upload">Upload skin and cape</a> <a href="/link">Link game</a> <a href="/account">Account</a> ' +
 		  '<form method="post" action="/logout" class="inline"><button type="submit">Log out</button></form>'
 		: '<a href="/login">Log in</a> <a href="/register">Create account</a>';
 	return `<!doctype html>
@@ -38,6 +38,7 @@ code { font-size: 1.2em; }
 .error { color: #b00020; }
 .ok { color: #1b5e20; }
 img.skin { image-rendering: pixelated; width: 128px; background: #eee; }
+img.cape { image-rendering: pixelated; width: 128px; height: 64px; background: #eee; }
 </style>
 </head>
 <body>
@@ -64,7 +65,7 @@ function home(account) {
 	return layout('Skin backend',
 		`<p>Signed in as <strong>${escapeHtml(account.username)}</strong>.</p>` +
 		`<p>Your game ID (XUID): <code>${escapeHtml(account.xuid)}</code></p>` +
-		'<p><a href="/upload">Upload your skin</a> or <a href="/link">link the game</a>.</p>',
+		'<p><a href="/upload">Upload your skin and cape</a> or <a href="/link">link the game</a>.</p>',
 		account);
 }
 
@@ -119,8 +120,9 @@ function upload({ account, error, ok, model }) {
 	const currentModel = model === 'slim' ? 'slim' : 'classic';
 	const classicChecked = currentModel === 'classic' ? ' checked' : '';
 	const slimChecked = currentModel === 'slim' ? ' checked' : '';
-	return layout('Upload skin',
+	return layout('Upload skin and cape',
 		message(error, ok) +
+		'<h2>Skin</h2>' +
 		'<p>Current skin:</p>' +
 		`<img class="skin" id="current" src="/skins/${xuid}" alt="" onerror="this.style.display='none'">` +
 		'<p><input type="file" id="file" accept="image/png"></p>' +
@@ -129,9 +131,17 @@ function upload({ account, error, ok, model }) {
 		`<label class="inline"><input type="radio" name="model" value="classic"${classicChecked}> Classic (4-pixel arms)</label>` +
 		`<label class="inline"><input type="radio" name="model" value="slim"${slimChecked}> Slim (3-pixel arms, Alex)</label>` +
 		'</fieldset>' +
-		'<p><button type="button" id="send">Upload</button></p>' +
+		'<p><button type="button" id="send">Upload skin</button></p>' +
 		'<p>PNG only, 64x32 or 64x64 pixels.</p>' +
 		'<p id="status"></p>' +
+		'<h2>Cape</h2>' +
+		'<p>Current cape:</p>' +
+		`<img class="cape" id="currentCape" src="/capes/${xuid}" alt="" onerror="this.style.display='none'">` +
+		'<p><input type="file" id="capeFile" accept="image/png"></p>' +
+		'<p><button type="button" id="sendCape">Upload cape</button></p>' +
+		'<p>A cape has no arm model. The game draws it from the 10x16 area at the top left of the sheet, so a ' +
+		'classic 64x32 cape sheet can be uploaded as drawn. PNG only, 64x32 or 64x64 pixels.</p>' +
+		'<p id="capeStatus"></p>' +
 		'<script>' +
 		'document.getElementById("send").addEventListener("click", async function () {' +
 		'  var status = document.getElementById("status");' +
@@ -147,6 +157,23 @@ function upload({ account, error, ok, model }) {
 		'      status.className = "ok"; status.textContent = "Uploaded (" + (data.model || model) + ").";' +
 		'      document.getElementById("current").style.display = "";' +
 		'      document.getElementById("current").src = "/skins/' + xuid + '?" + Date.now();' +
+		'    } else {' +
+		'      status.className = "error"; status.textContent = data.error || ("Upload failed (" + res.status + ")");' +
+		'    }' +
+		'  } catch (e) { status.className = "error"; status.textContent = "Upload failed: network error."; }' +
+		'});' +
+		'document.getElementById("sendCape").addEventListener("click", async function () {' +
+		'  var status = document.getElementById("capeStatus");' +
+		'  var file = document.getElementById("capeFile").files[0];' +
+		'  if (!file) { status.className = "error"; status.textContent = "Choose a PNG first."; return; }' +
+		'  status.className = ""; status.textContent = "Uploading...";' +
+		'  try {' +
+		'    var res = await fetch("/me/cape", { method: "PUT", headers: { "Content-Type": "image/png" }, body: file, credentials: "same-origin" });' +
+		'    var data = await res.json().catch(function () { return {}; });' +
+		'    if (res.ok) {' +
+		'      status.className = "ok"; status.textContent = "Uploaded.";' +
+		'      document.getElementById("currentCape").style.display = "";' +
+		'      document.getElementById("currentCape").src = "/capes/' + xuid + '?" + Date.now();' +
 		'    } else {' +
 		'      status.className = "error"; status.textContent = data.error || ("Upload failed (" + res.status + ")");' +
 		'    }' +

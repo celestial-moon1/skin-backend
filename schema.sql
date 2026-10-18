@@ -11,6 +11,15 @@ CREATE TABLE IF NOT EXISTS skins (
 -- CREATE TABLE IF NOT EXISTS leaves an existing table untouched, so add the column for databases made before it.
 ALTER TABLE skins ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'classic';
 
+-- Custom capes keyed by XUID, in their own table so a player can have a skin and a cape at the same time.
+-- There is no model column: only skins have an arm model. The game reads a cape from the top-left 10x16 area
+-- of the sheet, so a classic 64x32 cape and a 64x64 sheet are both stored exactly as uploaded.
+CREATE TABLE IF NOT EXISTS capes (
+	xuid       TEXT PRIMARY KEY,
+	png        BYTEA NOT NULL,
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Website accounts. The password is stored as a scrypt hash (see auth.js), never in plain text.
 -- The XUID is issued by this backend when the account is created. It is not a real Xbox XUID.
 CREATE TABLE IF NOT EXISTS accounts (
